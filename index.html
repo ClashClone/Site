@@ -102,7 +102,7 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: flex-end;
+            justify-content: center;
             padding: 0.25rem;
             font-weight: 900;
             color: #fff;
@@ -111,6 +111,16 @@
             transition: all 0.2s ease;
             position: relative;
             flex-shrink: 0;
+            overflow: hidden;
+        }
+        
+        .card-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            position: absolute;
+            top: 0;
+            left: 0;
         }
         
         #card-hand {
@@ -147,22 +157,21 @@
             border: 2px solid #f3e5f5;
             font-weight: 900;
             box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            z-index: 2;
         }
         
         .card .card-name {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
             font-size: 0.65rem;
             text-align: center;
             text-shadow: 1px 1px 2px #000;
-            background: rgba(0,0,0,0.6);
-            width: 100%;
+            background: rgba(0,0,0,0.8);
             padding: 2px 0;
             border-radius: 0 0 5px 5px;
-        }
-        
-        .card .card-icon {
-            font-size: 2rem;
-            margin: auto;
-            filter: drop-shadow(2px 2px 4px #000);
+            z-index: 2;
         }
         
         .card.disabled {
@@ -329,9 +338,6 @@
                 padding: 0.75rem 1.5rem;
                 font-size: 1rem;
             }
-            .card .card-icon {
-                font-size: 1.5rem;
-            }
         }
     </style>
 </head>
@@ -340,6 +346,111 @@
         <div id="game-container"></div>
     </div>
     <script type="module">
+        // --- IMAGE & SOUND CONFIGURATION ---
+        // Replace these URLs with your own Imgur links and sound URLs
+        const IMAGES = {
+             knight: 'https://i.imgur.com/etRpz0z.png',
+            archer: 'https://i.imgur.com/hutQOgv.png',
+            giant: 'https://i.imgur.com/pMxsnjR.png',
+            prince: 'https://i.imgur.com/C8IVSv2.png',
+            cannon: 'https://i.imgur.com/Pi3fWTe.png',
+            minions: 'https://i.imgur.com/DnR8cKU.png',
+            balloon: 'https://i.imgur.com/v1OkDbA.png',
+            playerTower: 'https://i.imgur.com/mOX1n4Y.png',
+            enemyTower: 'https://i.imgur.com/fpI3Nro.png',
+            kingTower: 'https://i.imgur.com/tVAL84A.png',
+
+        };
+
+        const SOUNDS = {
+            cardPlace: 'https://files.catbox.moe/v42nxq.mp3',
+            attack: 'https://example.com/attack.mp3',
+            explosion: 'https://files.catbox.moe/v42nxq.mp3',
+            victory: 'https://files.catbox.moe/t05pk4.mp3',
+            defeat: 'https://files.catbox.moe/55gwnv.mp3',
+            background: 'https://files.catbox.moe/dqhnoz.mp3',
+        };
+
+
+        // --- AUDIO SYSTEM ---
+        const audioCache = {};
+        let soundEnabled = true;
+        let musicEnabled = true;
+        let backgroundMusic = null;
+
+        function preloadAudio() {
+            Object.keys(SOUNDS).forEach(key => {
+                const audio = new Audio(SOUNDS[key]);
+                audio.preload = 'auto';
+                audio.onerror = () => console.warn(`Failed to load sound: ${key}`);
+                audioCache[key] = audio;
+            });
+
+            if (SOUNDS.background) {
+                backgroundMusic = new Audio(SOUNDS.background);
+                backgroundMusic.loop = true;
+                backgroundMusic.volume = 0.3;
+                backgroundMusic.preload = 'auto';
+            }
+        }
+
+        function playSound(soundName, volume = 1.0) {
+            if (!soundEnabled || !audioCache[soundName]) return;
+            
+            try {
+                const audio = audioCache[soundName].cloneNode();
+                audio.volume = volume;
+                audio.play().catch(e => console.warn('Audio play failed:', e));
+            } catch (e) {
+                console.warn('Sound playback error:', e);
+            }
+        }
+
+        function toggleBackgroundMusic(play = true) {
+            if (!musicEnabled || !backgroundMusic) return;
+            
+            if (play) {
+                backgroundMusic.currentTime = 0; // Restart from beginning
+                backgroundMusic.play().catch(e => console.warn('Music play failed:', e));
+            } else {
+                backgroundMusic.pause();
+            }
+        }
+
+        // --- IMAGE PRELOADING ---
+        const imageCache = {};
+        let imagesLoaded = false;
+
+        function preloadImages() {
+            return new Promise((resolve) => {
+                const imageKeys = Object.keys(IMAGES);
+                let loadedCount = 0;
+
+                imageKeys.forEach(key => {
+                    const img = new Image();
+                    img.onload = () => {
+                        loadedCount++;
+                        if (loadedCount === imageKeys.length) {
+                            imagesLoaded = true;
+                            resolve();
+                        }
+                    };
+                    img.onerror = () => {
+                        console.warn(`Failed to load image: ${key}`);
+                        loadedCount++;
+                        if (loadedCount === imageKeys.length) {
+                            imagesLoaded = true;
+                            resolve();
+                        }
+                    };
+                    img.src = IMAGES[key];
+                    imageCache[key] = img;
+                });
+
+                if (imageKeys.length === 0) resolve();
+            });
+        }
+
         // --- AUTHENTICATION & USER MANAGEMENT ---
         let currentUser = null;
         const USERS_KEY = 'clash_royale_users';
@@ -347,120 +458,62 @@
         function loadUsers() {
             try {
                 const data = localStorage.getItem(USERS_KEY);
-                if (data) {
-                    const parsed = JSON.parse(data);
-                    console.log('Loaded users from localStorage:', Object.keys(parsed));
-                    return parsed;
-                }
-                console.log('No users found in localStorage');
-                return {};
+                return data ? JSON.parse(data) : {};
             } catch (error) {
-                console.error('Error loading users from localStorage:', error);
+                console.error('Error loading users:', error);
                 return {};
             }
         }
 
         function saveUsers(users) {
             try {
-                const dataString = JSON.stringify(users);
-                localStorage.setItem(USERS_KEY, dataString);
-                console.log('Saved users to localStorage:', Object.keys(users));
+                localStorage.setItem(USERS_KEY, JSON.stringify(users));
                 return true;
             } catch (error) {
-                console.error('Error saving to localStorage:', error);
-                alert('Failed to save data. Your browser storage might be full.');
+                console.error('Error saving users:', error);
                 return false;
             }
         }
 
         function registerUser(username, password) {
-            if (!username || !password) {
-                return { success: false, message: 'Username and password required' };
-            }
-            
-            if (username.length < 3) {
-                return { success: false, message: 'Username must be at least 3 characters' };
-            }
-            
-            if (password.length < 4) {
-                return { success: false, message: 'Password must be at least 4 characters' };
-            }
+            if (!username || !password) return { success: false, message: 'Username and password required' };
+            if (username.length < 3) return { success: false, message: 'Username must be at least 3 characters' };
+            if (password.length < 4) return { success: false, message: 'Password must be at least 4 characters' };
 
-            try {
-                const users = loadUsers();
-                console.log('Current users before registration:', Object.keys(users));
-                
-                if (users[username]) {
-                    return { success: false, message: 'Username already exists' };
-                }
+            const users = loadUsers();
+            if (users[username]) return { success: false, message: 'Username already exists' };
 
-                users[username] = {
-                    password: btoa(password),
-                    trophies: 0,
-                    ownedCards: [...INITIAL_DECK],
-                    currentDeck: [...INITIAL_DECK],
-                    createdAt: Date.now()
-                };
+            users[username] = {
+                password: btoa(password),
+                trophies: 0,
+                ownedCards: [...INITIAL_DECK],
+                currentDeck: [...INITIAL_DECK],
+                createdAt: Date.now()
+            };
 
-                console.log('Users after adding new user:', Object.keys(users));
-                const saveResult = saveUsers(users);
-                console.log('Save result:', saveResult);
-                
-                // Verify the save worked
-                const verifyUsers = loadUsers();
-                console.log('Verification - users after save:', Object.keys(verifyUsers));
-                
-                if (verifyUsers[username]) {
-                    return { success: true, message: 'Account created successfully!' };
-                } else {
-                    return { success: false, message: 'Account created but verification failed. Try logging in anyway.' };
-                }
-            } catch (error) {
-                console.error('Registration error:', error);
-                return { success: false, message: 'Failed to create account: ' + error.message };
-            }
+            return saveUsers(users) ? { success: true, message: 'Account created successfully!' } : { success: false, message: 'Failed to save account' };
         }
 
         function loginUser(username, password) {
-            if (!username || !password) {
-                return { success: false, message: 'Username and password required' };
-            }
+            if (!username || !password) return { success: false, message: 'Username and password required' };
 
-            try {
-                const users = loadUsers();
-                console.log('All users during login:', Object.keys(users));
-                console.log('Looking for username:', username);
-                console.log('User exists?', users[username] ? 'Yes' : 'No');
-                
-                const user = users[username];
+            const users = loadUsers();
+            const user = users[username];
 
-                if (!user) {
-                    return { success: false, message: `User '${username}' not found. Registered users: ${Object.keys(users).join(', ') || 'none'}` };
-                }
+            if (!user) return { success: false, message: `User '${username}' not found.` };
+            if (atob(user.password) !== password) return { success: false, message: 'Incorrect password' };
 
-                console.log('User found, checking password...');
-                const storedPassword = atob(user.password);
-                console.log('Password match?', storedPassword === password);
+            currentUser = username;
+            trophies = user.trophies || 0;
+            ownedCards = user.ownedCards || [...INITIAL_DECK];
+            currentDeck = user.currentDeck || [...INITIAL_DECK];
 
-                if (storedPassword !== password) {
-                    return { success: false, message: 'Incorrect password' };
-                }
-
-                currentUser = username;
-                trophies = user.trophies || 0;
-                ownedCards = user.ownedCards || [...INITIAL_DECK];
-                currentDeck = user.currentDeck || [...INITIAL_DECK];
-
-                console.log('Login successful for user:', currentUser);
-                return { success: true, message: 'Login successful!' };
-            } catch (error) {
-                console.error('Login error:', error);
-                return { success: false, message: 'Login failed: ' + error.message };
-            }
+            return { success: true, message: 'Login successful!' };
         }
 
         function logoutUser() {
             saveCurrentUserData();
+            toggleBackgroundMusic(false);
             currentUser = null;
             trophies = 0;
             ownedCards = [...INITIAL_DECK];
@@ -470,7 +523,6 @@
 
         function saveCurrentUserData() {
             if (!currentUser) return;
-
             const users = loadUsers();
             if (users[currentUser]) {
                 users[currentUser].trophies = trophies;
@@ -478,7 +530,6 @@
                 users[currentUser].currentDeck = currentDeck;
                 users[currentUser].lastUpdated = Date.now();
                 saveUsers(users);
-                console.log('Saved data for user:', currentUser);
             }
         }
 
@@ -488,10 +539,6 @@
         let currentDeck = [];
         const SHOP_CARDS = ['knight', 'archer', 'giant', 'prince', 'cannon', 'minions', 'balloon'];
         const INITIAL_DECK = ['knight', 'archer', 'giant', 'cannon'];
-
-        function saveUserData() {
-            saveCurrentUserData();
-        }
 
         // --- GAME SETUP & CONSTANTS ---
         const gameContainer = document.getElementById('game-container');
@@ -512,41 +559,13 @@
 
         // --- CARD DEFINITIONS ---
         const CARD_DEFS = {
-            knight: { 
-                elixir: 3, type: 'KNIGHT', hp: 1400, damage: 150, attackSpeed: 1.1, 
-                attackRange: 15, speed: 0.8, size: 20, targetType: 'GROUND', 
-                icon: '🛡️', visionRange: 500 
-            },
-            archer: { 
-                elixir: 3, type: 'ARCHER', hp: 280, damage: 85, attackSpeed: 1.0, 
-                attackRange: 100, speed: 0.7, size: 15, targetType: 'ANY', 
-                icon: '🏹', visionRange: 500 
-            },
-            giant: { 
-                elixir: 5, type: 'GIANT', hp: 3400, damage: 200, attackSpeed: 1.5, 
-                attackRange: 15, speed: 0.5, size: 30, targetType: 'BUILDING', 
-                icon: '💪', visionRange: 500 
-            },
-            prince: { 
-                elixir: 5, type: 'PRINCE', hp: 1600, damage: 325, attackSpeed: 1.4, 
-                attackRange: 15, speed: 1.0, size: 22, targetType: 'GROUND', 
-                icon: '🏇', visionRange: 500 
-            },
-            cannon: { 
-                elixir: 3, type: 'CANNON', hp: 700, damage: 90, attackSpeed: 0.8, 
-                attackRange: 120, speed: 0, size: 35, targetType: 'GROUND', 
-                icon: '🎯', visionRange: 0, lifetime: 30, isBuilding: true 
-            },
-            minions: {
-                elixir: 3, type: 'MINIONS', hp: 200, damage: 80, attackSpeed: 1.0,
-                attackRange: 50, speed: 1.2, size: 12, targetType: 'ANY',
-                icon: '🦇', visionRange: 500
-            },
-            balloon: {
-                elixir: 5, type: 'BALLOON', hp: 1200, damage: 600, attackSpeed: 3.0,
-                attackRange: 15, speed: 0.6, size: 26, targetType: 'BUILDING',
-                icon: '🎈', visionRange: 500
-            },
+            knight: { elixir: 3, type: 'KNIGHT', hp: 1400, damage: 150, attackSpeed: 1.1, attackRange: 15, speed: 0.8, size: 20, targetType: 'GROUND', image: 'knight', visionRange: 500 },
+            archer: { elixir: 3, type: 'ARCHER', hp: 280, damage: 85, attackSpeed: 1.0, attackRange: 100, speed: 0.7, size: 15, targetType: 'ANY', image: 'archer', visionRange: 500 },
+            giant: { elixir: 5, type: 'GIANT', hp: 3400, damage: 200, attackSpeed: 1.5, attackRange: 15, speed: 0.5, size: 30, targetType: 'BUILDING', image: 'giant', visionRange: 500 },
+            prince: { elixir: 5, type: 'PRINCE', hp: 1600, damage: 325, attackSpeed: 1.4, attackRange: 15, speed: 1.0, size: 22, targetType: 'GROUND', image: 'prince', visionRange: 500 },
+            cannon: { elixir: 3, type: 'CANNON', hp: 700, damage: 90, attackSpeed: 0.8, attackRange: 120, speed: 0, size: 35, targetType: 'GROUND', image: 'cannon', visionRange: 0, lifetime: 30, isBuilding: true },
+            minions: { elixir: 3, type: 'MINIONS', hp: 200, damage: 80, attackSpeed: 1.0, attackRange: 50, speed: 1.2, size: 12, targetType: 'ANY', image: 'minions', visionRange: 500 },
+            balloon: { elixir: 5, type: 'BALLOON', hp: 1200, damage: 600, attackSpeed: 3.0, attackRange: 15, speed: 0.6, size: 26, targetType: 'BUILDING', image: 'balloon', visionRange: 500 },
         };
 
         const TOWER_DEFS = {
@@ -619,6 +638,7 @@
             canvas.addEventListener('click', handleCanvasClick);
             canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
             
+            toggleBackgroundMusic(true);
             requestAnimationFrame(gameLoop);
         }
 
@@ -716,6 +736,7 @@
                 building.hp -= hpLossPerSecond * deltaTime;
                 
                 if (building.hp <= 0 || building.lifetime <= 0) {
+                    playSound('explosion', 0.3);
                     buildings.splice(i, 1);
                     continue;
                 }
@@ -734,6 +755,7 @@
                     if (gameTime - building.lastAttackTime >= attackCooldown) {
                         building.lastAttackTime = gameTime;
                         spawnProjectile(building, building.target);
+                        playSound('attack', 0.2);
                     }
                 }
             }
@@ -743,6 +765,7 @@
             for (let i = units.length - 1; i >= 0; i--) {
                 const unit = units[i];
                 if (unit.hp <= 0) {
+                    playSound('explosion', 0.3);
                     units.splice(i, 1);
                     continue;
                 }
@@ -777,6 +800,7 @@
                         } else {
                             unit.target.hp -= unit.damage;
                         }
+                        playSound('attack', 0.2);
                     }
                 } else {
                     unit.isMoving = true;
@@ -874,6 +898,7 @@
                     if (gameTime - tower.lastAttackTime >= attackCooldown) {
                         tower.lastAttackTime = gameTime;
                         spawnProjectile(tower, tower.target);
+                        playSound('attack', 0.15);
                     }
                 }
             }
@@ -910,16 +935,19 @@
 
         function endGame(playerWon) {
             gameState = 'over';
+            toggleBackgroundMusic(false);
             const trophyChange = playerWon ? 30 : -20;
             trophies = Math.max(0, trophies + trophyChange);
-            saveUserData();
+            saveCurrentUserData();
             gameOverScreen.style.display = 'flex';
             gameOverText.textContent = playerWon ? `YOU WIN! (+${trophyChange} 🏆)` : `YOU LOSE! (${trophyChange} 🏆)`;
             gameOverText.style.color = playerWon ? "#4caf50" : "#f44336";
+            playSound(playerWon ? 'victory' : 'defeat', 0.5);
         }
 
         function endGameByTime() {
             gameState = 'over';
+            toggleBackgroundMusic(false);
             
             const playerTotalHp = towers.filter(t => t.owner === 'player').reduce((sum, t) => sum + t.hp, 0);
             const aiTotalHp = towers.filter(t => t.owner === 'ai').reduce((sum, t) => sum + t.hp, 0);
@@ -928,7 +956,7 @@
             const trophyChange = playerWon ? 30 : -20;
             
             trophies = Math.max(0, trophies + trophyChange);
-            saveUserData();
+            saveCurrentUserData();
             gameOverScreen.style.display = 'flex';
             
             if (playerTotalHp === aiTotalHp) {
@@ -937,6 +965,7 @@
             } else {
                 gameOverText.textContent = playerWon ? `TIME UP! YOU WIN! (+${trophyChange} 🏆)` : `TIME UP! YOU LOSE! (${trophyChange} 🏆)`;
                 gameOverText.style.color = playerWon ? "#4caf50" : "#f44336";
+                playSound(playerWon ? 'victory' : 'defeat', 0.5);
             }
         }
 
@@ -1012,72 +1041,59 @@
         }
 
         function drawTower(tower) {
-            const teamColor = tower.owner === 'player' ? '#2196f3' : '#f44336';
             const x = tower.x;
             const y = tower.y;
             const s = tower.size;
 
-            const stoneColor = '#9e9e9e';
-            ctx.fillStyle = stoneColor;
-            ctx.beginPath();
-            ctx.moveTo(x - s/2, y + s/2);
-            ctx.lineTo(x - s/1.5, y - s/2);
-            ctx.lineTo(x + s/1.5, y - s/2);
-            ctx.lineTo(x + s/2, y + s/2);
-            ctx.closePath();
-            ctx.fill();
-
-            ctx.fillStyle = '#757575';
-            ctx.fillRect(x - s/2, y - s/2 - s/3, s, s/3);
-
-            ctx.fillStyle = teamColor;
-            ctx.beginPath();
-            ctx.moveTo(x - s/4, y - s/2 - s/3 - 15);
-            ctx.lineTo(x, y - s/2 - s/3 - 25);
-            ctx.lineTo(x + s/4, y - s/2 - s/3 - 15);
-            ctx.closePath();
-            ctx.fill();
-
-            if (tower.type === 'KING') {
-                ctx.fillStyle = stoneColor;
-                ctx.fillRect(x - s/1.2, y - s/3, s * 1.4, s/1.5);
-
-                ctx.fillStyle = '#ffeb3b';
-                ctx.beginPath();
-                ctx.moveTo(x - 12, y - s/2 - s/3 - 5);
-                ctx.lineTo(x - 12, y - s/2 - s/3 - 15);
-                ctx.lineTo(x - 4, y - s/2 - s/3 - 10);
-                ctx.lineTo(x, y - s/2 - s/3 - 20);
-                ctx.lineTo(x + 4, y - s/2 - s/3 - 10);
-                ctx.lineTo(x + 12, y - s/2 - s/3 - 15);
-                ctx.lineTo(x + 12, y - s/2 - s/3 - 5);
-                ctx.closePath();
-                ctx.fill();
+            const imageKey = tower.type === 'KING' ? 'kingTower' : (tower.owner === 'player' ? 'playerTower' : 'enemyTower');
+            if (imageCache[imageKey] && imageCache[imageKey].complete) {
+                ctx.save();
+                if (tower.owner === 'ai') {
+                    ctx.translate(x, y);
+                    ctx.rotate(Math.PI);
+                    ctx.drawImage(imageCache[imageKey], -s/2, -s/2, s, s);
+                } else {
+                    ctx.drawImage(imageCache[imageKey], x - s/2, y - s/2, s, s);
+                }
+                ctx.restore();
+            } else {
+                const teamColor = tower.owner === 'player' ? '#2196f3' : '#f44336';
+                ctx.fillStyle = teamColor;
+                ctx.fillRect(x - s/2, y - s/2, s, s);
             }
 
-            let yOffset = tower.type === 'KING' ? -s/3 - 20 : -s/2 - 15;
+            let yOffset = tower.type === 'KING' ? -s/2 - 10 : -s/2 - 10;
             drawHealthBar(tower, yOffset);
         }
 
         function drawBuilding(building) {
-            const teamColor = building.owner === 'player' ? '#2196f3' : '#f44336';
             const x = building.x;
             const y = building.y;
             const s = building.size;
             
-            ctx.fillStyle = '#616161';
-            ctx.beginPath();
-            ctx.arc(x, y, s/2, 0, Math.PI * 2);
-            ctx.fill();
-            
-            ctx.fillStyle = '#424242';
-            ctx.fillRect(x - s/3, y - s/2, s/1.5, s/4);
-            
-            ctx.strokeStyle = teamColor;
-            ctx.lineWidth = 4;
-            ctx.beginPath();
-            ctx.arc(x, y, s/2 + 2, 0, Math.PI * 2);
-            ctx.stroke();
+            if (imageCache[building.image] && imageCache[building.image].complete) {
+                ctx.save();
+                if (building.owner === 'ai') {
+                    ctx.translate(x, y);
+                    ctx.rotate(Math.PI);
+                    ctx.drawImage(imageCache[building.image], -s/2, -s/2, s, s);
+                } else {
+                    ctx.drawImage(imageCache[building.image], x - s/2, y - s/2, s, s);
+                }
+                ctx.restore();
+            } else {
+                const teamColor = building.owner === 'player' ? '#2196f3' : '#f44336';
+                ctx.fillStyle = '#616161';
+                ctx.beginPath();
+                ctx.arc(x, y, s/2, 0, Math.PI * 2);
+                ctx.fill();
+                
+                ctx.strokeStyle = teamColor;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.arc(x, y, s/2 + 2, 0, Math.PI * 2);
+                ctx.stroke();
+            }
             
             const lifetimePercent = building.lifetime / 30;
             ctx.strokeStyle = lifetimePercent > 0.5 ? '#4caf50' : lifetimePercent > 0.2 ? '#ffeb3b' : '#f44336';
@@ -1090,9 +1106,8 @@
         }
 
         function drawUnit(unit) {
-            const teamColor = unit.owner === 'player' ? '#2196f3' : '#f44336';
             const x = unit.x;
-            const s = unit.size / 2;
+            const s = unit.size;
             const yOffset = unit.isMoving ? Math.sin(unit.animationTimer) * 3 : 0;
             const finalY = unit.y + yOffset;
 
@@ -1100,6 +1115,7 @@
             ctx.shadowBlur = 5;
             ctx.shadowOffsetY = 3;
 
+            const teamColor = unit.owner === 'player' ? '#2196f3' : '#f44336';
             ctx.fillStyle = teamColor;
             ctx.beginPath();
             ctx.ellipse(x, finalY + s/2, s, s/2, 0, 0, Math.PI * 2);
@@ -1107,118 +1123,32 @@
 
             ctx.shadowColor = 'transparent';
 
-            switch(unit.type) {
-                case 'KNIGHT':
-                    ctx.fillStyle = '#bdbdbd';
-                    ctx.beginPath();
-                    ctx.arc(x, finalY - s/2, s * 1.1, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#757575';
-                    ctx.beginPath();
-                    ctx.moveTo(x - s, finalY - s - 5);
-                    ctx.lineTo(x, finalY - s - 15);
-                    ctx.lineTo(x + s, finalY - s - 5);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    ctx.strokeStyle = '#e0e0e0';
-                    ctx.lineWidth = 3;
-                    ctx.beginPath();
-                    ctx.moveTo(x + s, finalY);
-                    ctx.lineTo(x + s + 10, finalY + 10);
-                    ctx.stroke();
-                    break;
-                case 'ARCHER':
-                    ctx.fillStyle = '#ffcc80';
-                    ctx.beginPath();
-                    ctx.arc(x, finalY - s/4, s * 0.9, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#4caf50';
-                    ctx.beginPath();
-                    ctx.moveTo(x - s, finalY - s);
-                    ctx.quadraticCurveTo(x, finalY - s - 10, x + s, finalY - s);
-                    ctx.lineTo(x, finalY);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    ctx.strokeStyle = '#795548';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(x + s/2, finalY - s/2);
-                    ctx.quadraticCurveTo(x + s, finalY, x + s/2, finalY + s/2);
-                    ctx.stroke();
-                    break;
-                case 'GIANT':
-                    ctx.fillStyle = '#ffcc80';
-                    ctx.beginPath();
-                    ctx.arc(x, finalY - s/3, s * 1.2, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#795548';
-                    ctx.beginPath();
-                    ctx.arc(x, finalY - s - 5, s * 0.8, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#6d4c41';
-                    ctx.fillRect(x + s, finalY - s/2, 15, s*1.5);
-                    break;
-                case 'PRINCE':
-                    ctx.fillStyle = '#7e57c2';
-                    ctx.beginPath();
-                    ctx.ellipse(x, finalY, s * 1.5, s, 0, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#ffeb3b';
-                    ctx.beginPath();
-                    ctx.moveTo(x - 8, finalY - s - 10);
-                    ctx.lineTo(x, finalY - s - 20);
-                    ctx.lineTo(x + 8, finalY - s - 10);
-                    ctx.closePath();
-                    ctx.fill();
-
-                    ctx.strokeStyle = '#f57f17';
-                    ctx.lineWidth = 4;
-                    ctx.beginPath();
-                    ctx.moveTo(x + s, finalY);
-                    ctx.lineTo(x + s + 20, finalY);
-                    ctx.stroke();
-                    break;
-                case 'BALLOON':
-                    ctx.fillStyle = '#ef5350';
-                    ctx.beginPath();
-                    ctx.arc(x, finalY, s * 1.3, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.strokeStyle = '#c62828';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(x, finalY + s);
-                    ctx.lineTo(x, finalY + s * 2);
-                    ctx.stroke();
-
-                    ctx.fillStyle = '#8d6e63';
-                    ctx.fillRect(x - s/2, finalY + s * 2, s, s * 0.6);
-                    break;
-                case 'MINIONS':
-                    ctx.fillStyle = '#9c27b0';
-                    ctx.beginPath();
-                    ctx.ellipse(x, finalY, s * 0.8, s * 0.5, 0, 0, Math.PI * 2);
-                    ctx.fill();
-
-                    ctx.fillStyle = '#4a148c';
-                    ctx.beginPath();
-                    ctx.moveTo(x - s, finalY);
-                    ctx.quadraticCurveTo(x - s * 1.5, finalY - s, x - s * 0.5, finalY - s/2);
-                    ctx.fill();
-                    ctx.beginPath();
-                    ctx.moveTo(x + s, finalY);
-                    ctx.quadraticCurveTo(x + s * 1.5, finalY - s, x + s * 0.5, finalY - s/2);
-                    ctx.fill();
-                    break;
+            if (imageCache[unit.image] && imageCache[unit.image].complete) {
+                ctx.save();
+                ctx.translate(x, finalY);
+                
+                // Calculate rotation based on movement direction
+                let rotation = 0;
+                if (unit.target) {
+                    const dx = unit.target.x - unit.x;
+                    const dy = unit.target.y - unit.y;
+                    rotation = Math.atan2(dy, dx) + Math.PI / 2; // +90 degrees so image faces direction of movement
+                } else {
+                    // If no target, face the direction they're naturally moving
+                    rotation = unit.owner === 'player' ? 0 : Math.PI;
+                }
+                
+                ctx.rotate(rotation);
+                ctx.drawImage(imageCache[unit.image], -s, -s, s * 2, s * 2);
+                ctx.restore();
+            } else {
+                ctx.fillStyle = teamColor;
+                ctx.beginPath();
+                ctx.arc(x, finalY, s, 0, Math.PI * 2);
+                ctx.fill();
             }
-            drawHealthBar(unit, yOffset - 10);
+
+            drawHealthBar(unit, yOffset - s - 5);
         }
 
         function drawHealthBar(entity, yOffset = 0) {
@@ -1281,6 +1211,7 @@
             if (playerElixir >= card.elixir) {
                 playerElixir -= card.elixir;
                 spawnUnit(selectedCard, 'player', x, y);
+                playSound('cardPlace', 0.4);
                 selectedCard = null;
                 updateCardUI();
                 updateElixirUI();
@@ -1299,6 +1230,7 @@
             if (playerElixir >= card.elixir) {
                 playerElixir -= card.elixir;
                 spawnUnit(selectedCard, 'player', x, y);
+                playSound('cardPlace', 0.4);
                 selectedCard = null;
                 updateCardUI();
                 updateElixirUI();
@@ -1361,10 +1293,12 @@
             const card = CARD_DEFS[cardName];
             if (!card) return '';
             
+            const imageUrl = IMAGES[card.image] || '';
+            
             return `
                 <button class="card" data-card="${cardName}">
                     ${showCost ? `<span class="elixir-cost">${card.elixir}</span>` : ''}
-                    <span class="card-icon">${card.icon}</span>
+                    ${imageUrl ? `<img src="${imageUrl}" class="card-image" alt="${cardName}">` : `<div class="card-icon">${cardName[0].toUpperCase()}</div>`}
                     <span class="card-name">${cardName.toUpperCase()}</span>
                 </button>
             `;
@@ -1376,10 +1310,6 @@
                     <div class="auth-container">
                         <h1 class="text-4xl font-black text-center mb-2" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Clash-ish Royale</h1>
                         <p class="text-center text-gray-600 mb-4 text-sm">A strategic battle game</p>
-                        
-                        <div id="storage-status" class="text-xs text-center mb-4 px-3 py-2 rounded-lg bg-green-50 text-green-700">
-                            <span id="storage-indicator">✓ Data saves to your browser</span>
-                        </div>
                         
                         <div id="auth-message"></div>
                         
@@ -1397,19 +1327,9 @@
                             <button class="auth-button" onclick="handleRegister()">Register</button>
                             <button class="auth-button secondary" onclick="showLogin()">Back to Login</button>
                         </div>
-                        
-                        <div class="text-xs text-center text-gray-500 mt-4">
-                            <button onclick="showDebugInfo()" class="underline">Debug Info</button>
-                        </div>
                     </div>
                 </div>
             `;
-        }
-
-        function showDebugInfo() {
-            const users = loadUsers();
-            const userList = Object.keys(users);
-            alert(`Debug Info:\n\nRegistered users: ${userList.length}\nUsernames: ${userList.join(', ') || 'None'}\n\nLocalStorage available: ${typeof(Storage) !== "undefined" ? 'Yes' : 'No'}\n\nCurrent user: ${currentUser || 'None'}`);
         }
 
         function renderMainMenu() {
@@ -1424,10 +1344,49 @@
                         <button class="game-button w-full max-w-xs" onclick="changeScreen('arena')">FIGHT!</button>
                         <button class="game-button w-full max-w-xs bg-gradient-to-r from-indigo-500 to-purple-600" onclick="changeScreen('deck')">Deck Customizer</button>
                         <button class="game-button w-full max-w-xs bg-gradient-to-r from-teal-500 to-cyan-600" onclick="changeScreen('shop')">Shop</button>
+                        <button class="game-button w-full max-w-xs bg-gradient-to-r from-yellow-500 to-orange-600" onclick="toggleSettings()">Settings</button>
                         <button class="game-button w-full max-w-xs bg-gradient-to-r from-gray-600 to-gray-700" onclick="logoutUser()">Logout</button>
+                        
+                        <div id="settings-panel" style="display: none;" class="mt-4 w-full max-w-xs bg-black bg-opacity-60 rounded-xl p-4">
+                            <h3 class="text-white font-bold mb-3 text-center">Audio Settings</h3>
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-white">Sound Effects</span>
+                                <label class="relative inline-block w-12 h-6">
+                                    <input type="checkbox" id="sound-toggle" ${soundEnabled ? 'checked' : ''} onchange="toggleSound()" class="sr-only peer">
+                                    <div class="w-full h-full bg-gray-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                                </label>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-white">Background Music</span>
+                                <label class="relative inline-block w-12 h-6">
+                                    <input type="checkbox" id="music-toggle" ${musicEnabled ? 'checked' : ''} onchange="toggleMusic()" class="sr-only peer">
+                                    <div class="w-full h-full bg-gray-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
+                                </label>
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
+        }
+
+        function toggleSettings() {
+            const panel = document.getElementById('settings-panel');
+            if (panel) {
+                panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        function toggleSound() {
+            soundEnabled = !soundEnabled;
+        }
+
+        function toggleMusic() {
+            musicEnabled = !musicEnabled;
+            if (musicEnabled && currentScreen === 'arena') {
+                toggleBackgroundMusic(true);
+            } else {
+                toggleBackgroundMusic(false);
+            }
         }
 
         function renderShop() {
@@ -1455,7 +1414,7 @@
         function buyCard(cardName) {
             if (!ownedCards.includes(cardName)) {
                 ownedCards.push(cardName);
-                saveUserData();
+                saveCurrentUserData();
                 renderShop();
             }
         }
@@ -1473,7 +1432,7 @@
                                 ${currentDeck.map(name => `
                                     <button class="card" data-card="${name}" onclick="removeFromDeck('${name}')">
                                         <span class="elixir-cost">${CARD_DEFS[name].elixir}</span>
-                                        <span class="card-icon">${CARD_DEFS[name].icon}</span>
+                                        ${IMAGES[CARD_DEFS[name].image] ? `<img src="${IMAGES[CARD_DEFS[name].image]}" class="card-image" alt="${name}">` : ''}
                                         <span class="card-name">${name.toUpperCase()}</span>
                                     </button>
                                 `).join('')}
@@ -1486,7 +1445,7 @@
                                 ${availableCards.map(name => `
                                     <button class="card ${currentDeck.length >= 4 ? 'disabled' : ''}" data-card="${name}" onclick="addToDeck('${name}')">
                                         <span class="elixir-cost">${CARD_DEFS[name].elixir}</span>
-                                        <span class="card-icon">${CARD_DEFS[name].icon}</span>
+                                        ${IMAGES[CARD_DEFS[name].image] ? `<img src="${IMAGES[CARD_DEFS[name].image]}" class="card-image" alt="${name}">` : ''}
                                         <span class="card-name">${name.toUpperCase()}</span>
                                     </button>
                                 `).join('')}
@@ -1503,7 +1462,7 @@
             const index = currentDeck.indexOf(cardName);
             if (index > -1) {
                 currentDeck.splice(index, 1);
-                saveUserData();
+                saveCurrentUserData();
                 renderDeckCustomizer();
             }
         }
@@ -1511,7 +1470,7 @@
         function addToDeck(cardName) {
             if (currentDeck.length < 4 && !currentDeck.includes(cardName)) {
                 currentDeck.push(cardName);
-                saveUserData();
+                saveCurrentUserData();
                 renderDeckCustomizer();
             }
         }
@@ -1598,6 +1557,9 @@
         }
 
         function changeScreen(screenName) {
+            if (screenName !== 'arena') {
+                toggleBackgroundMusic(false);
+            }
             currentScreen = screenName;
             renderApp();
         }
@@ -1610,7 +1572,7 @@
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
-                        <p class="text-white text-xl">Loading...</p>
+                        <p class="text-white text-xl">Loading Assets...</p>
                     </div>
                 </div>
             `;
@@ -1649,11 +1611,20 @@
         window.showLogin = showLogin;
         window.showRegister = showRegister;
         window.logoutUser = logoutUser;
-        window.showDebugInfo = showDebugInfo;
+        window.toggleSettings = toggleSettings;
+        window.toggleSound = toggleSound;
+        window.toggleMusic = toggleMusic;
 
         // Start the app
-        function startApp() {
+        async function startApp() {
             renderLoading();
+            
+            // Preload audio
+            preloadAudio();
+            
+            // Preload images
+            await preloadImages();
+            
             setTimeout(() => {
                 currentScreen = 'auth';
                 renderApp();
@@ -1664,3 +1635,5 @@
     </script>
 </body>
 </html>
+
+
